@@ -3,39 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Video Call</title>
+    <title>Auto-Connect Video Call</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.3.1/peerjs.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
         video { width: 45%; border: 2px solid black; margin: 10px; }
-        input, button { padding: 10px; font-size: 16px; margin: 5px; }
     </style>
 </head>
 <body>
-    <h2>Secure Video Call</h2>
+    <h2>Auto-Connect Video Call</h2>
     <video id="localVideo" autoplay muted></video>
     <video id="remoteVideo" autoplay></video>
     
-    <br>
-    <button onclick="createCallID()">Create Call ID</button>
-    <input type="text" id="callID" placeholder="Enter Call ID">
-    <button onclick="joinCall()">Join Call</button>
-    
     <script>
         let localStream;
-        let peer = new Peer({
-            config: {
-                'iceServers': [
-                    { urls: 'stun:stun.l.google.com:19302' }, // Public Google STUN server
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
-            }
-        });
-
-        peer.on('open', id => {
-            console.log("Your ID: " + id);
-            document.getElementById("callID").value = id;
-        });
+        let peer = new Peer(); // Generates a random ID
+        let socket = new WebSocket("wss://your-signaling-server.com"); // Replace with an actual WebSocket server
 
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
@@ -44,29 +27,28 @@
             })
             .catch(error => console.error("Error accessing media devices:", error));
 
+        peer.on('open', id => {
+            console.log("Your ID: " + id);
+            socket.send(JSON.stringify({ type: "join", peerId: id })); // Tell the server we are here
+        });
+
+        socket.onmessage = (event) => {
+            let data = JSON.parse(event.data);
+            if (data.type === "match" && data.peerId !== peer.id) {
+                console.log("Matched with:", data.peerId);
+                let call = peer.call(data.peerId, localStream);
+                call.on('stream', remoteStream => {
+                    document.getElementById("remoteVideo").srcObject = remoteStream;
+                });
+            }
+        };
+
         peer.on('call', call => {
             call.answer(localStream);
             call.on('stream', remoteStream => {
                 document.getElementById("remoteVideo").srcObject = remoteStream;
             });
         });
-
-        function createCallID() {
-            alert("Share this Call ID: " + peer.id);
-        }
-
-        function joinCall() {
-            let callID = document.getElementById("callID").value;
-            if (!callID) {
-                alert("Enter a valid Call ID!");
-                return;
-            }
-            let call = peer.call(callID, localStream);
-            call.on('stream', remoteStream => {
-                document.getElementById("remoteVideo").srcObject = remoteStream;
-            });
-        }
     </script>
 </body>
 </html>
-
