@@ -18,7 +18,8 @@
     <script>
         let localStream;
         let peer = new Peer(); // Generates a random ID
-        let socket = new WebSocket("wss://your-signaling-server.com"); // Replace with an actual WebSocket server
+        let socket = new WebSocket("https://tide-sophisticated-aluminum.glitch.me");
+ // Replace with an actual WebSocket server
 
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
