@@ -28,7 +28,7 @@
             color: black;
             background-color: silver;
         }
-        video { 
+        video, canvas { 
             width: 30%; 
             border: 2px solid black;
             margin: 10px;
@@ -50,39 +50,32 @@
     <h2>Connect with Friends</h2>
     <h5 id="Status">Waiting for connection...</h5>
     <video id="localVideo" autoplay muted></video>
+    <canvas id="filteredVideo"></canvas>
     <video id="remoteVideo1" autoplay></video>
-    <video id="remoteVideo2" autoplay></video>
-
+    <br>
+    <button onclick="toggleFilter()">Toggle Pixelated Filter</button>
     <br>
     <button onclick="createCallID()">Create Call ID</button>
     <input type="text" id="callID" placeholder="Enter Call ID">
     <button onclick="joinCall()">Join Call</button>
-
     <div id="chat-container">
         <h3>Chat</h3>
         <div id="chat-box"></div>
         <input type="text" id="chatInput" placeholder="Type a message">
         <button onclick="sendMessage()">Send</button>
     </div>
-
+    
     <script>
         let localStream;
-        let peer = new Peer({
-            config: {
-                'iceServers': [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'turn:your-turn-server.com', username: 'user', credential: 'password' }
-                ]
-            }
-        });
+        let filterEnabled = false;
+        let video = document.getElementById("localVideo");
+        let canvas = document.getElementById("filteredVideo");
+        let ctx = canvas.getContext("2d");
 
+        let peer = new Peer();
         let status = document.getElementById('Status');
-        let connections = [];
-        let callID = null;
-
-        // Store chat connections separately to ensure the host can chat
-        let chatConnections = [];
+        let conn; // Stores chat connection
+        let call; // Stores video call connection
 
         peer.on('open', id => {
             console.log("Your ID: " + id);
@@ -90,129 +83,118 @@
             status.innerText = "Waiting for connections...";
         });
 
+        peer.on('call', incomingCall => {
+            incomingCall.answer(localStream);
+            incomingCall.on('stream', remoteStream => {
+                document.getElementById("remoteVideo1").srcObject = remoteStream;
+            });
+            call = incomingCall;
+            status.innerText = "Connected via video!";
+        });
+
+        peer.on('connection', incomingConn => {
+            conn = incomingConn;
+            conn.on('data', receiveMessage);
+            conn.on('open', () => {
+                status.innerText = "Chat Connected!";
+            });
+        });
+
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
                 localStream = stream;
-                document.getElementById("localVideo").srcObject = stream;
+                video.srcObject = stream;
+                startFilter();
             })
             .catch(error => {
                 console.error("Error accessing media devices:", error);
                 status.innerText = "Error accessing camera/microphone!";
             });
 
-        peer.on('call', call => {
-            if (!localStream) {
-                console.error("No local stream available to answer the call.");
-                return;
-            }
+        function toggleFilter() {
+            filterEnabled = !filterEnabled;
+        }
 
-            call.answer(localStream);
-            call.on('stream', remoteStream => {
-                if (!document.getElementById("remoteVideo1").srcObject) {
-                    document.getElementById("remoteVideo1").srcObject = remoteStream;
-                } else {
-                    document.getElementById("remoteVideo2").srcObject = remoteStream;
+        function startFilter() {
+            function drawFrame() {
+                if (!video.videoWidth || !video.videoHeight) {
+                    requestAnimationFrame(drawFrame);
+                    return;
                 }
-                status.innerText = "Connected to a peer!";
-            });
 
-            connections.push(call);
-        });
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
 
-        peer.on('connection', connection => {
-            console.log("Connection established with peer:", connection.peer);
-            
-            connection.on('open', () => {
-                chatConnections.push(connection);
-                setupChat();
-                status.innerText = "Chat connection established!";
-            });
+                if (filterEnabled) {
+                    let scaleFactor = 10; // Adjust this for more/less pixelation
+                    let smallCanvas = document.createElement("canvas");
+                    let smallCtx = smallCanvas.getContext("2d");
 
-            connection.on('close', () => {
-                console.log("Connection closed:", connection.peer);
-                chatConnections = chatConnections.filter(conn => conn.peer !== connection.peer);
-            });
-        });
+                    // Scale down
+                    smallCanvas.width = video.videoWidth / scaleFactor;
+                    smallCanvas.height = video.videoHeight / scaleFactor;
+                    smallCtx.drawImage(video, 0, 0, smallCanvas.width, smallCanvas.height);
+
+                    // Scale back up
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(smallCanvas, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                }
+
+                requestAnimationFrame(drawFrame);
+            }
+            drawFrame();
+        }
 
         function createCallID() {
-            alert("Share this Call ID: " + peer.id);
+            alert("Your Call ID: " + peer.id);
+            document.getElementById("callID").value = peer.id;
         }
 
         function joinCall() {
-            let id = document.getElementById("callID").value;
-            if (!id || id === peer.id) {
-                alert("Enter a valid Call ID to join!");
+            let callID = document.getElementById("callID").value.trim();
+            if (!callID) {
+                alert("Please enter a Call ID.");
                 return;
             }
 
-            let call = peer.call(id, localStream);
+            call = peer.call(callID, localStream);
             call.on('stream', remoteStream => {
-                if (!document.getElementById("remoteVideo1").srcObject) {
-                    document.getElementById("remoteVideo1").srcObject = remoteStream;
-                } else {
-                    document.getElementById("remoteVideo2").srcObject = remoteStream;
-                }
-                status.innerText = "Joined a call!";
+                document.getElementById("remoteVideo1").srcObject = remoteStream;
             });
 
-            let connection = peer.connect(id);
-            connection.on('open', () => {
-                console.log("Chat connection established!");
-                chatConnections.push(connection);
-                setupChat();
-                status.innerText = "Joined chat!";
-            });
-
-            connection.on('close', () => {
-                console.log("Chat connection closed:", connection.peer);
-                chatConnections = chatConnections.filter(conn => conn.peer !== connection.peer);
-            });
-        }
-
-        function setupChat() {
-            chatConnections.forEach(conn => {
-                if (!conn.hasListener) {
-                    conn.on('data', message => {
-                        console.log("Received message:", message);
-                        displayMessage("Peer: " + message);
-                    });
-                    conn.hasListener = true;
-                }
+            conn = peer.connect(callID);
+            conn.on('data', receiveMessage);
+            conn.on('open', () => {
+                status.innerText = "Chat Connected!";
             });
         }
 
         function sendMessage() {
-            let message = document.getElementById("chatInput").value;
-            if (message.trim() === "") return;
+            let message = document.getElementById("chatInput").value.trim();
+            if (!message) return;
 
-            if (chatConnections.length === 0) {
-                status.innerText = "No active chat connections!";
-                return;
-            }
-
-            console.log("Sending message:", message);
-            chatConnections.forEach(conn => {
+            if (conn && conn.open) {
                 conn.send(message);
-            });
-
-            displayMessage("You: " + message);
-            document.getElementById("chatInput").value = "";
+                appendMessage("You: " + message);
+                document.getElementById("chatInput").value = "";
+            } else {
+                alert("You are not connected to anyone!");
+            }
         }
 
-        function displayMessage(text) {
+        function receiveMessage(message) {
+            appendMessage("Friend: " + message);
+        }
+
+        function appendMessage(text) {
             let chatBox = document.getElementById("chat-box");
-            let messageElement = document.createElement("p");
+            let messageElement = document.createElement("div");
             messageElement.textContent = text;
             chatBox.appendChild(messageElement);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
-
-        document.getElementById("chatInput").addEventListener("keydown", function(event) {
-            if (event.key === "Enter") {
-                event.preventDefault(); 
-                sendMessage(); 
-            }
-        });
     </script>
 </body>
 </html>
