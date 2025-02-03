@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Connect with Friends</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.3.1/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/face-api.js/1.3.0/face-api.min.js"></script>
     <style>
+        /* Style modifications */
         h3 { font-family: Comic Sans MS; }
         h2 { font-family: Comic Sans MS; font-size: 50px; color: gold; }
         button, input { 
@@ -28,11 +30,23 @@
             color: black;
             background-color: silver;
         }
-        video, canvas { 
+        .video-container {
+            position: relative;
+            display: inline-block;
+        }
+        video {
             width: 30%; 
             border: 2px solid black;
             margin: 10px;
             background-color: gold;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
         }
         #chat-container { margin-top: 20px; }
         #chat-box { 
@@ -49,11 +63,17 @@
 <body>
     <h2>Connect with Friends</h2>
     <h5 id="Status">Waiting for connection...</h5>
-    <video id="localVideo" autoplay muted></video>
-    <canvas id="filteredVideo"></canvas>
-    <video id="remoteVideo1" autoplay></video>
+    
+    <div class="video-container">
+        <video id="localVideo" autoplay muted></video>
+        <canvas id="filterCanvas"></canvas>
+    </div>
+    
+    <div id="remoteVideos"></div>
+    
     <br>
     <button onclick="toggleFilter()">Toggle Pixelated Filter</button>
+    <button onclick="toggleRaccoonFilter()">Toggle Raccoon Filter</button>
     <br>
     <button onclick="createCallID()">Create Call ID</button>
     <input type="text" id="callID" placeholder="Enter Call ID">
@@ -68,14 +88,19 @@
     <script>
         let localStream;
         let filterEnabled = false;
+        let raccoonFilterEnabled = false;
         let video = document.getElementById("localVideo");
-        let canvas = document.getElementById("filteredVideo");
+        let canvas = document.getElementById("filterCanvas");
         let ctx = canvas.getContext("2d");
 
         let peer = new Peer();
         let status = document.getElementById('Status');
-        let conn; // Stores chat connection
-        let call; // Stores video call connection
+        let conn;
+        let call;
+        let remoteVideos = document.getElementById('remoteVideos');
+
+        const raccoonImage = new Image();
+        raccoonImage.src = "./Rac.png"; // Replace with actual URL
 
         peer.on('open', id => {
             console.log("Your ID: " + id);
@@ -86,7 +111,10 @@
         peer.on('call', incomingCall => {
             incomingCall.answer(localStream);
             incomingCall.on('stream', remoteStream => {
-                document.getElementById("remoteVideo1").srcObject = remoteStream;
+                let remoteVideo = document.createElement('video');
+                remoteVideo.srcObject = remoteStream;
+                remoteVideo.autoplay = true;
+                remoteVideos.appendChild(remoteVideo);
             });
             call = incomingCall;
             status.innerText = "Connected via video!";
@@ -104,6 +132,7 @@
             .then(stream => {
                 localStream = stream;
                 video.srcObject = stream;
+                loadFaceModel();
                 startFilter();
             })
             .catch(error => {
@@ -115,6 +144,14 @@
             filterEnabled = !filterEnabled;
         }
 
+        function toggleRaccoonFilter() {
+            raccoonFilterEnabled = !raccoonFilterEnabled;
+        }
+
+        async function loadFaceModel() {
+            await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/models');
+        }
+
         function startFilter() {
             function drawFrame() {
                 if (!video.videoWidth || !video.videoHeight) {
@@ -122,28 +159,35 @@
                     return;
                 }
 
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
+                const videoWidth = video.videoWidth;
+                const videoHeight = video.videoHeight;
+                canvas.width = videoWidth;
+                canvas.height = videoHeight;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 if (filterEnabled) {
-                    let scaleFactor = 10; // Adjust this for more/less pixelation
+                    let scaleFactor = 4;
                     let smallCanvas = document.createElement("canvas");
                     let smallCtx = smallCanvas.getContext("2d");
-
-                    // Scale down
-                    smallCanvas.width = video.videoWidth / scaleFactor;
-                    smallCanvas.height = video.videoHeight / scaleFactor;
+                    smallCanvas.width = videoWidth / scaleFactor;
+                    smallCanvas.height = videoHeight / scaleFactor;
                     smallCtx.drawImage(video, 0, 0, smallCanvas.width, smallCanvas.height);
-
-                    // Scale back up
                     ctx.imageSmoothingEnabled = false;
-                    ctx.drawImage(smallCanvas, 0, 0, canvas.width, canvas.height);
-                } else {
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(smallCanvas, 0, 0, videoWidth, videoHeight);
+                    ctx.imageSmoothingEnabled = true;
+                }
+
+                if (raccoonFilterEnabled) {
+                    let maskWidth = canvas.width * 0.2;
+                    let maskHeight = canvas.height * 0.67;
+                    let maskX = (canvas.width - maskWidth) / 2;
+                    let maskY = canvas.height * 0.02;
+                    ctx.drawImage(raccoonImage, maskX, maskY, maskWidth, maskHeight);
                 }
 
                 requestAnimationFrame(drawFrame);
             }
+
             drawFrame();
         }
 
@@ -161,7 +205,10 @@
 
             call = peer.call(callID, localStream);
             call.on('stream', remoteStream => {
-                document.getElementById("remoteVideo1").srcObject = remoteStream;
+                let remoteVideo = document.createElement('video');
+                remoteVideo.srcObject = remoteStream;
+                remoteVideo.autoplay = true;
+                remoteVideos.appendChild(remoteVideo);
             });
 
             conn = peer.connect(callID);
